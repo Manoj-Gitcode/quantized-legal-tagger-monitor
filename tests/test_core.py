@@ -4,7 +4,7 @@ They start skipped. Remove the `skip` line as you work on each milestone.
 """
 import pytest
 
-from app.core import milestone_1
+from app.core import milestone_1, milestone_2
 
 
 # Milestone 1: Prepare a subset of the LEDGAR dataset for legal clause tagging.
@@ -21,9 +21,10 @@ def test_milestone_1():
 
 
 # Milestone 2: Fine-tune a GPT-2 model to tag legal clauses using the classification as generation approach.
-@pytest.mark.skip(reason="remove this line when you start milestone 2")
-def test_milestone_2():
-    raise NotImplementedError("write the test for milestone 2")
+def test_milestone_2(tmp_path):
+    result = milestone_2(epochs=1, max_examples=8, out_dir=tmp_path / "model")
+    assert (tmp_path / "model" / "config.json").exists()
+    assert result["final_loss"] > 0
 
 
 # Milestone 3: Evaluate the tagging accuracy of the fine-tuned model.

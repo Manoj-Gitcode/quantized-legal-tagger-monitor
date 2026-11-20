@@ -6,6 +6,8 @@ from pathlib import Path
 
 DATA_DIR = Path("data")
 SUBSET_PATH = DATA_DIR / "ledgar_subset.json"
+MODEL_NAME = "gpt2"
+MODEL_DIR = Path("models/gpt2-ledgar")
 SEED = 42
 
 
@@ -54,8 +56,69 @@ def load_subset():
 
 
 # --- Milestone 2: Fine-tune a GPT-2 model to tag legal clauses using the classification as generation approach.
-def milestone_2():  # TODO(milestone 2)
-    raise NotImplementedError("TODO(milestone 2)")
+def build_batch(tokenizer, rows):
+    """Turn a few examples into padded tensors. Only the label words count for the loss."""
+    import torch
+
+    eos = tokenizer.eos_token_id
+    pairs = []
+    for row in rows:
+        prompt_ids = tokenizer(row["prompt"])["input_ids"]
+        label_ids = tokenizer(" " + row["label"])["input_ids"] + [eos]
+        pairs.append((prompt_ids, label_ids))
+
+    longest = max(len(p) + len(l) for p, l in pairs)
+    input_ids, attention_mask, labels = [], [], []
+    for prompt_ids, label_ids in pairs:
+        pad = longest - len(prompt_ids) - len(label_ids)
+        input_ids.append(prompt_ids + label_ids + [eos] * pad)
+        attention_mask.append([1] * (len(prompt_ids) + len(label_ids)) + [0] * pad)
+        labels.append([-100] * len(prompt_ids) + label_ids + [-100] * pad)
+
+    return {
+        "input_ids": torch.tensor(input_ids),
+        "attention_mask": torch.tensor(attention_mask),
+        "labels": torch.tensor(labels),
+    }
+
+
+def milestone_2(epochs=2, batch_size=8, lr=5e-5, max_examples=None, out_dir=MODEL_DIR):
+    """Fine-tune GPT-2 to write the label after 'Label:' and save the model."""
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    torch.manual_seed(SEED)
+    subset = load_subset() if SUBSET_PATH.exists() else milestone_1()
+    rows = list(subset["train"])
+    if max_examples:
+        rows = rows[:max_examples]
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+
+    model.train()
+    step = 0
+    last_loss = None
+    for epoch in range(epochs):
+        random.Random(SEED + epoch).shuffle(rows)
+        for start in range(0, len(rows), batch_size):
+            batch = build_batch(tokenizer, rows[start:start + batch_size])
+            loss = model(**batch).loss
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            step += 1
+            last_loss = loss.item()
+            if step % 5 == 0:
+                print(f"epoch {epoch + 1}/{epochs}  step {step}  loss {last_loss:.3f}", flush=True)
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained(out_dir)
+    tokenizer.save_pretrained(out_dir)
+    return {"model_dir": str(out_dir), "final_loss": last_loss, "examples": len(rows), "epochs": epochs}
 
 
 # --- Milestone 3: Evaluate the tagging accuracy of the fine-tuned model.
